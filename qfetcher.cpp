@@ -1,17 +1,26 @@
-#include "qfetcher.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <glog/logging.h>
 
 #include <QDebug>
 #include <QUrl>
 #include <QDateTime>
 #include <QTime>
 #include <cassert>
+#include <string>
+#include <msgpack.hpp>
+
+#include "qfetcher.h"
 
 namespace qcontent {
 
 void QFetcher::cycleFetch()
 {
+    DLOG(INFO) << "cycle fetch";
+    if (m_global_stop) {
+        return;
+    }
+
     if (m_stop_crawl || m_record_buffer.size() >= m_concurrent) {
         return;
     }
@@ -26,13 +35,18 @@ void QFetcher::cycleFetch()
 
 void QFetcher::cyclePush()
 {
+    DLOG(INFO) << __FUNCTION__;
     QList<std::string>  tmp;
     int size = m_record_buffer.size();
     for (int i = 0; i < size; i++) {
         int push_ret = pushCrawlerRecord(m_record_buffer[i]);
         if (push_ret == QCONTENTHUB_OK) {
-        } else {
+        } else if (push_ret == QCONTENTHUB_AGAIN) {
             tmp.push_back(m_record_buffer[i]);
+        } else if (push_ret == QCONTENTHUB_WARN) {
+            LOG(WARNING) << "push crawled record warn";
+        } else if (push_ret == QCONTENTHUB_ERROR) {
+            LOG(ERROR) << "push crawled record error";
         }
     }
     m_record_buffer.clear();
@@ -42,7 +56,7 @@ void QFetcher::cyclePush()
 
 void QFetcher::crawlUrl(const QUrl &qurl, QCrawlerRecord &record)
 {
-    qDebug() << "crawl: " << qurl.toString();
+    DLOG(INFO) << "crawl: " << record.url;
     QNetworkRequest request(qurl);
     QNetworkReply *reply = m_manager.get(request);
 
@@ -69,13 +83,25 @@ void QFetcher::start()
 int QFetcher::fetchCrawlerRecord()
 {
     QCrawlerRecord record;
-    record.url = "http://www.cnblogs.com/kaima/archive/2009/08/25/1553510.html";
-    record.url = "http://localhost/";
-    QUrl qurl(QString::fromUtf8(record.url.c_str()));
-    crawlUrl(qurl, record);
-     // TODO fetch and begin download
-     //
-     return 0;
+    std::string record_str;
+    int ret = m_input_queue->pop_url(record_str);
+    DLOG(INFO) << "pop_url ret: " << ret;
+    if (ret == QCONTENTHUB_OK) {
+        msgpack::zone zone;
+        msgpack::object obj;
+        try {
+            msgpack::unpack(record_str.c_str(), record_str.size(), NULL, &zone, &obj);
+            obj.convert(&record);
+        } catch (std::exception& e) {
+            // TODO
+            fprintf(stderr, "%s\n", e.what());
+            return QCONTENTHUB_ERROR;
+        }
+        QUrl qurl(QString::fromUtf8(record.url.c_str()));
+        crawlUrl(qurl, record);
+    }
+
+    return ret;
 }
 
 int QFetcher::pushCrawlerRecord(const QCrawlerRecord &record)
@@ -88,6 +114,7 @@ int QFetcher::pushCrawlerRecord(const QCrawlerRecord &record)
 
 int QFetcher::pushCrawlerRecord(const std::string &rec_str)
 {
+    DLOG(INFO) << __FUNCTION__;
     int push_ret = m_out_queue->push_nowait(rec_str);
     if (push_ret == QCONTENTHUB_OK) {
         m_stop_crawl = false;
@@ -106,7 +133,7 @@ void QFetcher::downloadFinished(QNetworkReply *reply)
     QCrawlerRecord &rec = m_current_downloads[reply];
 
     if (reply->error()) {
-        rec.crawl_okay = false;
+        rec.crawled_okay = false;
         int http_code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         rec.crawl_failed_times++;
         rec.http_code = http_code;
@@ -116,7 +143,7 @@ void QFetcher::downloadFinished(QNetworkReply *reply)
         if (http_code == 301  || http_code == 302) {
             rec.is_redirect = true;
             if (rec.redirect_times > 4) {
-                rec.crawl_okay = false;
+                rec.crawled_okay = false;
                 pushCrawlerRecord(rec);
             } else {
                 // continue crawl redict url
@@ -131,7 +158,7 @@ void QFetcher::downloadFinished(QNetworkReply *reply)
                 crawlUrl(qredirect, rec);
             }
         } else if (http_code == 200) {
-            rec.crawl_okay = true;
+            rec.crawled_okay = true;
             //rec.crawl_failed_time = 0
             QByteArray data = reply->readAll();
 
@@ -142,12 +169,7 @@ void QFetcher::downloadFinished(QNetworkReply *reply)
         }
     }
 
-    qDebug() << "download: " << reply->url() << " okay";
-/*
- * QTime
-    frame->setContent(reply->readAll(), "text/html", url);
-    printf("time elapsed: %d\n", begin_time.elapsed());
-*/
+    DLOG(INFO) << "download: " << rec.url << " okay";
     m_current_downloads.remove(reply);
     reply->deleteLater();
 }
