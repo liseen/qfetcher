@@ -9,6 +9,6 @@ HEADERS += ../qcontentcommon/qcontent_config.h
 INCLUDEPATH  = /opt/qcrawler-thirdparty/include ../qcontentcommon ../libqcontenthub
 LIBS = -L /opt/qcrawler-thirdparty/lib -Wl,-rpath,../libqcontenthub -L../libqcontenthub -lqcontenthub -lglog
 
-CONFIG += debug
+#CONFIG += debug
 
 QT += network

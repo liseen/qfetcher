@@ -25,12 +25,14 @@ public:
     QFetcher(UrlQueue *input_queue, HubQueue *out_queue, int concurrent = 10) : m_input_queue(input_queue), m_out_queue(out_queue), m_concurrent(concurrent), m_stop_crawl(false) {
         fetch_timer = NULL;
         push_timer = NULL;
+        stop_timer = NULL;
         m_global_stop = false;
         connect(&m_manager, SIGNAL(finished(QNetworkReply*)),
             SLOT(downloadFinished(QNetworkReply*)));
     }
 
     void start();
+    void stop();
     void crawlUrl(const QUrl &qurl, QCrawlerRecord &record);
     int fetchCrawlerRecord();
     int pushCrawlerRecord(const QCrawlerRecord &record);
@@ -39,6 +41,7 @@ public:
 public slots:
     void cycleFetch();
     void cyclePush();
+    void cycleStop();
     void downloadFinished(QNetworkReply *reply);
 
 private:
@@ -49,6 +52,7 @@ private:
     QList<std::string> m_record_buffer;
     QTimer *fetch_timer;
     QTimer *push_timer;
+    QTimer *stop_timer;
 
     int m_concurrent;
     volatile bool m_stop_crawl;

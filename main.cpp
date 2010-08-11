@@ -7,10 +7,13 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QStringList>
-#include <QApplication>
+#include <QCoreApplication>
 
 #include <qcontent_config.h>
+
 #include "qfetcher.h"
+
+static qcontent::QFetcher *global_qfetcher = NULL;
 
 static void signal_handler(int sig)
 {
@@ -19,6 +22,10 @@ static void signal_handler(int sig)
         case SIGHUP:
         case SIGINT:
             // TODO
+            if (global_qfetcher) {
+                global_qfetcher->stop();
+            }
+
             break;
         default:
             break;
@@ -137,6 +144,9 @@ int main(int argc, char **argv)
     qcontent::UrlQueue urlqueue(url_queue_host, url_queue_port);
     qcontent::HubQueue crawled_queue(crawled_queue_host.c_str(), crawled_queue_port, crawled_queue_name);
     qcontent::QFetcher fetcher(&urlqueue, &crawled_queue, multiple);
+
+    global_qfetcher = &fetcher;
+
     fetcher.start();
 
     app.exec();

@@ -6,6 +6,7 @@
 #include <QUrl>
 #include <QDateTime>
 #include <QTime>
+#include <QCoreApplication>
 #include <cassert>
 #include <string>
 #include <msgpack.hpp>
@@ -16,7 +17,7 @@ namespace qcontent {
 
 void QFetcher::cycleFetch()
 {
-    DLOG(INFO) << "cycle fetch";
+    VLOG(1) << __FUNCTION__;
     if (m_global_stop) {
         return;
     }
@@ -35,7 +36,7 @@ void QFetcher::cycleFetch()
 
 void QFetcher::cyclePush()
 {
-    DLOG(INFO) << __FUNCTION__;
+    VLOG(1) << __FUNCTION__;
     QList<std::string>  tmp;
     int size = m_record_buffer.size();
     for (int i = 0; i < size; i++) {
@@ -56,7 +57,7 @@ void QFetcher::cyclePush()
 
 void QFetcher::crawlUrl(const QUrl &qurl, QCrawlerRecord &record)
 {
-    DLOG(INFO) << "crawl: " << record.url;
+    VLOG(1) << "crawl: " << record.url;
     QNetworkRequest request(qurl);
     QNetworkReply *reply = m_manager.get(request);
 
@@ -66,18 +67,41 @@ void QFetcher::crawlUrl(const QUrl &qurl, QCrawlerRecord &record)
 
 void QFetcher::start()
 {
+    m_global_stop = false;
+
     if (fetch_timer == NULL) {
         fetch_timer = new QTimer(this);
+        connect(fetch_timer, SIGNAL(timeout()), this, SLOT(cycleFetch()));
     }
     if (push_timer == NULL) {
         push_timer = new QTimer(this);
+        connect(push_timer, SIGNAL(timeout()), this, SLOT(cyclePush()));
     }
 
-    connect(fetch_timer, SIGNAL(timeout()), this, SLOT(cycleFetch()));
-    connect(push_timer, SIGNAL(timeout()), this, SLOT(cyclePush()));
 
     fetch_timer->start(1000);
     push_timer->start(1000);
+}
+
+void QFetcher::cycleStop()
+{
+    VLOG(1) << __FUNCTION__;
+    if (m_global_stop && m_current_downloads.size() == 0 &&
+            m_record_buffer.size() == 0) {
+        VLOG(1) << "quit application";
+        QCoreApplication::quit();
+    }
+}
+
+void QFetcher::stop()
+{
+    VLOG(1) << __FUNCTION__;
+    m_global_stop = true;
+    if (stop_timer == NULL) {
+        stop_timer = new QTimer(this);
+        connect(stop_timer, SIGNAL(timeout()), this, SLOT(cycleStop()));
+        stop_timer->start(1000);
+    }
 }
 
 int QFetcher::fetchCrawlerRecord()
@@ -85,7 +109,7 @@ int QFetcher::fetchCrawlerRecord()
     QCrawlerRecord record;
     std::string record_str;
     int ret = m_input_queue->pop_url(record_str);
-    DLOG(INFO) << "pop_url ret: " << ret;
+    VLOG(1) << "pop_url ret: " << ret;
     if (ret == QCONTENTHUB_OK) {
         msgpack::zone zone;
         msgpack::object obj;
@@ -94,7 +118,7 @@ int QFetcher::fetchCrawlerRecord()
             obj.convert(&record);
         } catch (std::exception& e) {
             // TODO
-            fprintf(stderr, "%s\n", e.what());
+            LOG(ERROR) << "uppack crawler record error " << e.what();
             return QCONTENTHUB_ERROR;
         }
         QUrl qurl(QString::fromUtf8(record.url.c_str()));
@@ -114,7 +138,7 @@ int QFetcher::pushCrawlerRecord(const QCrawlerRecord &record)
 
 int QFetcher::pushCrawlerRecord(const std::string &rec_str)
 {
-    DLOG(INFO) << __FUNCTION__;
+    VLOG(1) << __FUNCTION__;
     int push_ret = m_out_queue->push_nowait(rec_str);
     if (push_ret == QCONTENTHUB_OK) {
         m_stop_crawl = false;
@@ -169,7 +193,7 @@ void QFetcher::downloadFinished(QNetworkReply *reply)
         }
     }
 
-    DLOG(INFO) << "download: " << rec.url << " okay";
+    VLOG(1) << "download: " << rec.url << " okay";
     m_current_downloads.remove(reply);
     reply->deleteLater();
 }
